@@ -187,6 +187,7 @@ void BindDriver(wstring hwid, wstring inf_path)
 
 BOOLEAN IsBuiltinNVMeControllerDriver(wstring devpath, wstring& hwid)
 {
+    hwid.clear();
     HDEVINFO infoset;
     SP_DEVINFO_DATA infodata;
     SP_DEVICE_INTERFACE_DATA devif;
