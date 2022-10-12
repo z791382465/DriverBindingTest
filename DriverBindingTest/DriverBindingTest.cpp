@@ -19,6 +19,9 @@ using namespace std;
 #define FORMAT_16_BYTES     _T("%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X")
 #define FORMAT_SYSTEMTIME   _T("%04d/%02d/%02d %02d:%02d:%02d.%03d")
 
+#define MODE_BIND_SPECIFIC   0
+#define MODE_BIND_BUILTIN   1
+
 typedef std::basic_string<TCHAR> tstring;
 
 __inline void ParsePropertyToString(BYTE* data, DEVPROPTYPE type, tstring& result)
@@ -170,24 +173,34 @@ __inline void GetDevicePropertry(HDEVINFO infoset, PSP_DEVINFO_DATA infodata,
     ParsePropertyToString(buffer, type, result);
 }
 
+void UninstallDriver(wstring infname)
+{
+    DWORD error = 0;
+
+    if (!SetupUninstallOEMInf(infname.c_str(), SUOI_FORCEDELETE, NULL))
+    {
+        error = GetLastError();
+        wprintf(L"  Error code=%d\n", error);
+    }
+}
+
 void BindDriver(wstring hwid, wstring inf_path)
 {
     DWORD error = 0;
     BOOL reboot = false;
 
     SetupSetNonInteractiveMode(true);
-
-    if (!UpdateDriverForPlugAndPlayDevicesW(NULL, hwid.c_str(), inf_path.c_str(), INSTALLFLAG_FORCE, &reboot))
+    if (!UpdateDriverForPlugAndPlayDevices(NULL, hwid.c_str(), inf_path.c_str(), INSTALLFLAG_FORCE, &reboot))
     {
         error = GetLastError();
         wprintf(L"  Error code=%d\n", error);
     }
-    wprintf(L"  Installed INF=%s\n", inf_path.c_str());
 }
 
-BOOLEAN IsBuiltinNVMeControllerDriver(wstring devpath, wstring& hwid)
+void GetDeviceInfo(wstring devpath, wstring& hwid, wstring& current_infname)
 {
     hwid.clear();
+    current_infname.clear();
     HDEVINFO infoset;
     SP_DEVINFO_DATA infodata;
     SP_DEVICE_INTERFACE_DATA devif;
@@ -196,9 +209,7 @@ BOOLEAN IsBuiltinNVMeControllerDriver(wstring devpath, wstring& hwid)
     int err = 0;
     DEVPROPTYPE PropType = 0;
     WCHAR Buffer[4096] = { 0 };
-    wstring current_infname;
     size_t comma_index = 0;
-    BOOLEAN result = false;
 
     infoset = SetupDiCreateDeviceInfoList(NULL, NULL);
     if (INVALID_HANDLE_VALUE == infoset) {
@@ -230,11 +241,6 @@ BOOLEAN IsBuiltinNVMeControllerDriver(wstring devpath, wstring& hwid)
     comma_index = hwid.find(',');
     hwid = hwid.substr(0, comma_index);
     wprintf(L"  Hardware Id=%s\n", hwid.c_str());
-    if (current_infname == L"stornvme.inf")
-    {
-        wprintf(L"  Built-in NVMe Controller Driver\n");
-        result = true;
-    }
 
     SetupDiDeleteDeviceInterfaceData(infoset, &devif);
     error = 0;
@@ -244,8 +250,6 @@ out:
         wprintf(L"error occurred, LastError=%d\n", error);
     if (infoset != NULL && infoset != INVALID_HANDLE_VALUE)
         SetupDiDestroyDeviceInfoList(infoset);
-
-    return result;
 }
 
 BOOLEAN ListStorportAdapters(list<wstring>& result)
@@ -293,32 +297,58 @@ BOOLEAN ListStorportAdapters(list<wstring>& result)
 
 void ShowUsage()
 {
-    wprintf(L"Usage: DriverBindingTest.exe [INF File]\n");
+    wprintf(L"Usage: DriverBindingTest.exe [Mode] [INF File]\n");
+    wprintf(L"       [Mode] 0 is bind to specific driver, need argument [INF File].\n");
+    wprintf(L"       [Mode] 1 is bind to built-in driver.\n");
     wprintf(L"       [INF File] is the INF file you want to bind.\n");
-    wprintf(L"example: DriverBindingTest c:\\test\\graid_driver\\nvme.inf \n");
+    wprintf(L"example: DriverBindingTest 0 c:\\test\\graid_driver\\nvme.inf\n");
+    wprintf(L"example: DriverBindingTest 1\n");
     wprintf(L"\n");
 }
 
-int _tmain(int argc, _TCHAR* argv[])
+int _tmain(int argc, TCHAR* argv[])
 {
-    if (argc < 2)
+    int mode;
+    wstring inffile;
+    wstring builtin_inffile = L"c:\\windows\\inf\\stornvme.inf";
+    int count = 0;
+    wstring hwid;
+    wstring current_infname;
+    list<wstring> devlist;
+
+    if (argc == 2)
+    {
+        mode = _wtoi(argv[1]);
+    }
+    else if (argc == 3)
+    {
+        mode = _wtoi(argv[1]);
+        inffile = argv[2];
+    }
+    else
     {
         ShowUsage();
         return -1;
     }
 
-    int count = 0;
-    wstring hwid;
-
-    list<wstring> devlist;
     ListStorportAdapters(devlist);
     for (const auto& devpath : devlist)
     {
         count++;
         wprintf(L"#%d %s\n", count, devpath.c_str());
-        if (IsBuiltinNVMeControllerDriver(devpath, hwid))
+        GetDeviceInfo(devpath, hwid, current_infname);
+        if (mode == MODE_BIND_SPECIFIC && current_infname == L"stornvme.inf")
         {
-            BindDriver(hwid, argv[1]);
+            wprintf(L"  Bind to specific driver=%s\n", inffile.c_str());
+            BindDriver(hwid, inffile);
+        }
+        else if (mode == MODE_BIND_BUILTIN && current_infname.find(L"oem") != string::npos)
+        {
+            wprintf(L"  Bind to built-in driver=%s\n", builtin_inffile.c_str());
+            BindDriver(hwid, builtin_inffile);
+
+            wprintf(L"  Uninstall driver=%s\n", builtin_inffile.c_str());
+            UninstallDriver(current_infname);
         }
         wprintf(L"\n");
     }
