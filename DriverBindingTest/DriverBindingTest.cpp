@@ -347,7 +347,7 @@ int _tmain(int argc, TCHAR* argv[])
             wprintf(L"  Bind to built-in driver=%s\n", builtin_inffile.c_str());
             BindDriver(hwid, builtin_inffile);
 
-            wprintf(L"  Uninstall driver=%s\n", builtin_inffile.c_str());
+            wprintf(L"  Uninstall driver=%s\n", current_infname.c_str());
             UninstallDriver(current_infname);
         }
         wprintf(L"\n");
